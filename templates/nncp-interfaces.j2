@@ -1,0 +1,55 @@
+# templates/nncp-interfaces.j2
+# Generate interface configuration for NNCP
+---
+{% set network = item.0.value %}
+{% set node = item.1 %}
+{% if network.vlan_id %}
+- name: {{ item.0.key }}
+  type: vlan
+  state: up
+  vlan:
+    base-iface: {{ network.interface }}
+    id: {{ network.vlan_id }}
+    reorder-headers: true
+  ipv4:
+    enabled: true
+    dhcp: false
+    address:
+      - ip: {{ node.networks[item.0.key].ip }}
+        prefix-length: {{ network.cidr.split('/')[1] }}
+  ipv6:
+    enabled: false
+  mtu: {{ network.mtu }}
+{% endif %}
+{% if item.0.key == 'ctlplane' %}
+- name: {{ network.interface }}
+  type: ethernet
+  state: up
+  ipv4:
+    enabled: true
+    dhcp: false
+    address:
+      - ip: {{ node.networks.ctlplane.ip }}
+        prefix-length: {{ network.cidr.split('/')[1] }}
+  ipv6:
+    enabled: false
+  mtu: {{ network.mtu }}
+{% endif %}
+{% if item.0.key == 'octavia' and network.bridge_name is defined %}
+- name: {{ network.interface }}.{{ network.vlan_id }}
+  type: vlan
+  state: up
+  vlan:
+    base-iface: {{ network.interface }}
+    id: {{ network.vlan_id }}
+- name: {{ network.bridge_name }}
+  type: linux-bridge
+  state: up
+  bridge:
+    options:
+      stp:
+        enabled: false
+    port:
+      - name: {{ network.interface }}.{{ network.vlan_id }}
+  mtu: {{ network.mtu }}
+{% endif %}

@@ -1,0 +1,12 @@
+# templates/dataplane-deployment.yaml.j2
+# OpenStackDataPlaneDeployment configuration
+apiVersion: dataplane.openstack.org/v1beta1
+kind: OpenStackDataPlaneDeployment
+metadata:
+  name: data-plane-deploy-{{ environment_name }}
+  namespace: openstack
+spec:
+  nodeSets:
+  {% for nodeset in dataplane_nodesets %}
+    - {{ nodeset.name }}
+  {% endfor %}

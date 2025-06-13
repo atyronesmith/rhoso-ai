@@ -1,0 +1,28 @@
+# templates/netconfig-networks.j2
+# NetConfig network definitions
+{% for net_name, net_config in networks.items() %}
+- name: {{ net_name | capitalize }}
+  dnsDomain: {{ net_config.dns_domain }}
+  subnets:
+    - name: subnet1
+      cidr: {{ net_config.cidr }}
+      {% if net_config.gateway %}
+      gateway: {{ net_config.gateway }}
+      {% endif %}
+      {% if net_config.allocation_ranges %}
+      allocationRanges:
+      {% for range in net_config.allocation_ranges %}
+        - start: {{ range.start }}
+          end: {{ range.end }}
+      {% endfor %}
+      {% endif %}
+      {% if net_config.exclude_addresses is defined %}
+      excludeAddresses:
+      {% for addr in net_config.exclude_addresses %}
+        - {{ addr }}
+      {% endfor %}
+      {% endif %}
+      {% if net_config.vlan_id %}
+      vlan: {{ net_config.vlan_id }}
+      {% endif %}
+{% endfor %}

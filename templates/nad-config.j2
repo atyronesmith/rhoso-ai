@@ -1,0 +1,30 @@
+# templates/nad-config.j2
+# NetworkAttachmentDefinition configuration
+{
+  "cniVersion": "0.3.1",
+  "name": "{{ item.key }}",
+  {% if item.key == 'octavia' and item.value.bridge_name is defined %}
+  "type": "bridge",
+  "bridge": "{{ item.value.bridge_name }}",
+  {% else %}
+  "type": "macvlan",
+  "master": "{% if item.value.vlan_id %}{{ item.key }}{% else %}{{ item.value.interface }}{% endif %}",
+  {% endif %}
+  {% if item.value.nad_ipam_range %}
+  "ipam": {
+    "type": "whereabouts",
+    "range": "{{ item.value.cidr }}",
+    "range_start": "{{ item.value.nad_ipam_range.start }}",
+    "range_end": "{{ item.value.nad_ipam_range.end }}"
+    {% if item.key == 'octavia' %}
+    ,
+    "routes": [
+      {
+        "dst": "192.1.2.0/16",
+        "gw": "192.0.2.150"
+      }
+    ]
+    {% endif %}
+  }
+  {% endif %}
+}

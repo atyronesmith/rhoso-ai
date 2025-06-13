@@ -1,0 +1,241 @@
+---
+# deploy-rhoso.yml
+# Ansible playbook to deploy Red Hat OpenStack Services on OpenShift (RHOSO)
+# Usage: ansible-playbook -i inventory deploy-rhoso.yml
+
+- name: Deploy RHOSO on OpenShift
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/network-config.yml
+    - vars/deployment-config.yml
+
+  tasks:
+    # Prerequisites check
+    - name: Check if logged into OpenShift
+      ansible.builtin.command: oc whoami
+      register: oc_user
+      changed_when: false
+      failed_when: oc_user.rc != 0
+
+    - name: Display current user
+      ansible.builtin.debug:
+        msg: "Logged in as: {{ oc_user.stdout }}"
+
+    # Chapter 1: Installing and preparing the operators
+    - name: Install OpenStack Operator
+      block:
+        - name: Apply OpenStack Operator subscription
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: operators.coreos.com/v1alpha1
+              kind: Subscription
+              metadata:
+                name: openstack-operator
+                namespace: openstack-operators
+              spec:
+                channel: stable-v1.0
+                installPlanApproval: Automatic
+                name: openstack-operator
+                source: redhat-operators
+                sourceNamespace: openshift-marketplace
+
+        - name: Wait for OpenStack Operator to be ready
+          kubernetes.core.k8s_info:
+            api_version: operators.coreos.com/v1alpha1
+            kind: ClusterServiceVersion
+            namespace: openstack-operators
+            label_selectors:
+              - operators.coreos.com/openstack-operator.openstack-operators
+          register: csv_status
+          until: csv_status.resources | length > 0 and csv_status.resources[0].status.phase == "Succeeded"
+          retries: 30
+          delay: 10
+
+        - name: Create OpenStack Operator instance
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: core.openstack.org/v1beta1
+              kind: OpenStack
+              metadata:
+                name: openstack
+                namespace: openstack-operators
+              spec: {}
+
+    # Chapter 2: Preparing OpenShift for RHOSO
+    - name: Create storage class
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: storage.k8s.io/v1
+          kind: StorageClass
+          metadata:
+            name: "{{ storage_class_name }}"
+          provisioner: "{{ storage_provisioner }}"
+          parameters: "{{ storage_parameters | default({}) }}"
+          volumeBindingMode: "{{ storage_binding_mode | default('WaitForFirstConsumer') }}"
+      when: create_storage_class | default(false)
+
+    - name: Create OpenStack namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: openstack
+            labels:
+              kubernetes.io/metadata.name: openstack
+              pod-security.kubernetes.io/enforce: privileged
+              security.openshift.io/scc.podSecurityLabelSync: "false"
+
+    - name: Create service secrets
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: osp-secret
+            namespace: openstack
+          type: Opaque
+          data: "{{ service_passwords }}"
+
+    # Chapter 3: Preparing networks
+    - name: Apply network configurations
+      ansible.builtin.include_tasks: tasks/configure-networks.yml
+
+    # Generate Kustomize base files
+    - name: Create Kustomize directory structure
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - ./kustomize/base
+        - ./kustomize/base/networking
+        - ./kustomize/base/controlplane
+        - ./kustomize/base/dataplane
+        - ./kustomize/overlays/{{ environment_name }}
+
+    - name: Generate base network configurations
+      ansible.builtin.template:
+        src: templates/{{ item.template }}
+        dest: ./kustomize/base/networking/{{ item.name }}
+        mode: "0644"
+      loop:
+        - { template: nncp.yaml.j2, name: nncp.yaml }
+        - { template: nad.yaml.j2, name: nad.yaml }
+        - { template: metallb-pools.yaml.j2, name: metallb-pools.yaml }
+        - { template: metallb-l2adv.yaml.j2, name: metallb-l2adv.yaml }
+        - { template: netconfig.yaml.j2, name: netconfig.yaml }
+
+    - name: Generate control plane configuration
+      ansible.builtin.template:
+        src: templates/controlplane.yaml.j2
+        dest: ./kustomize/base/controlplane/controlplane.yaml
+        mode: "0644"
+
+    - name: Generate data plane configurations
+      ansible.builtin.template:
+        src: templates/{{ item }}
+        dest: ./kustomize/base/dataplane/{{ item | regex_replace('.j2$', '') }}
+        mode: "0644"
+      loop:
+        - dataplane-nodeset.yaml.j2
+        - dataplane-deployment.yaml.j2
+
+    - name: Create base kustomization file
+      ansible.builtin.copy:
+        content: |
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+
+          resources:
+          - networking/nncp.yaml
+          - networking/nad.yaml
+          - networking/metallb-pools.yaml
+          - networking/metallb-l2adv.yaml
+          - networking/netconfig.yaml
+          - controlplane/controlplane.yaml
+          - dataplane/dataplane-nodeset.yaml
+          - dataplane/dataplane-deployment.yaml
+
+          namespace: openstack
+        dest: ./kustomize/base/kustomization.yaml
+        mode: "0644"
+
+    - name: Create overlay kustomization
+      ansible.builtin.copy:
+        content: |
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+
+          bases:
+          - ../../base
+
+          namespace: openstack
+
+          # Add any environment-specific patches here
+          patchesStrategicMerge: []
+        dest: ./kustomize/overlays/{{ environment_name }}/kustomization.yaml
+        mode: "0644"
+
+    - name: Build final configurations with Kustomize
+      ansible.builtin.command:
+        cmd: kubectl kustomize ./kustomize/overlays/{{ environment_name }}
+      register: kustomize_output
+      changed_when: false
+
+    - name: Save generated configuration
+      ansible.builtin.copy:
+        content: "{{ kustomize_output.stdout }}"
+        dest: ./rhoso-deployment-{{ environment_name }}.yaml
+        mode: "0644"
+
+    - name: Apply configurations if not in dry-run mode
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ kustomize_output.stdout | from_yaml_all | list }}"
+      when: not dry_run | default(false)
+
+    # Verify deployment
+    - name: Wait for control plane to be ready
+      kubernetes.core.k8s_info:
+        api_version: core.openstack.org/v1beta1
+        kind: OpenStackControlPlane
+        name: openstack-control-plane
+        namespace: openstack
+      register: controlplane_status
+      until: controlplane_status.resources | length > 0 and ( controlplane_status.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready')
+        | selectattr('status', 'equalto', 'True')
+        | list
+        | length > 0
+         ) # noqa jinja[spacing]
+      retries: 60
+      delay: 30
+      when: not dry_run | default(false)
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg: |
+          RHOSO Deployment Summary:
+          - Environment: {{ environment_name }}
+          - Control Plane Networks: {{ networks.keys() | list }}
+          - Data Plane Node Sets: {{ dataplane_nodesets | length }}
+          - Storage Class: {{ storage_class_name }}
+
+          Generated files:
+          - Kustomize configs: ./kustomize/
+          - Final deployment: ./rhoso-deployment-{{ environment_name }}.yaml
+
+          {% if dry_run | default(false) %}
+          DRY RUN MODE: No resources were created. Review the generated files before applying.
+          {% else %}
+          Deployment initiated. Monitor progress with:
+          oc get openstackcontrolplane -n openstack
+          oc get openstackdataplanenodeset -n openstack
+          {% endif %}

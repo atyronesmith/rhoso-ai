@@ -1,0 +1,335 @@
+# templates/controlplane.yaml.j2
+# OpenStackControlPlane configuration
+apiVersion: core.openstack.org/v1beta1
+kind: OpenStackControlPlane
+metadata:
+  name: {{ control_plane.name }}
+  namespace: openstack
+spec:
+  secret: osp-secret
+  storageClass: {{ storage_class_name }}
+
+  dns:
+    template:
+      options:
+      {% for server in dns_servers %}
+        - key: server
+          values:
+            - {{ server }}
+      {% endfor %}
+      override:
+        service:
+          metadata:
+            annotations:
+              metallb.universe.tf/address-pool: ctlplane
+              metallb.universe.tf/allow-shared-ip: ctlplane
+              metallb.universe.tf/loadBalancerIPs: {{ networks.ctlplane.metallb_pool.start }}
+          spec:
+            type: LoadBalancer
+      replicas: 2
+
+  cinder:
+    apiOverride:
+      route: {}
+    template:
+      databaseInstance: openstack
+      secret: osp-secret
+      cinderAPI:
+        replicas: {{ control_plane.services.cinder.api_replicas }}
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+              spec:
+                type: LoadBalancer
+      cinderScheduler:
+        replicas: {{ control_plane.services.cinder.scheduler_replicas }}
+      cinderBackup:
+        networkAttachments:
+          - storage
+        replicas: {{ control_plane.services.cinder.backup_replicas }}
+      cinderVolumes:
+        volume1:
+          networkAttachments:
+            - storage
+          replicas: {{ control_plane.services.cinder.volume_replicas }}
+
+  nova:
+    apiOverride:
+      route: {}
+    template:
+      apiServiceTemplate:
+        replicas: {{ control_plane.services.nova.api_replicas }}
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+              spec:
+                type: LoadBalancer
+      metadataServiceTemplate:
+        replicas: {{ control_plane.services.nova.metadata_replicas }}
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+            spec:
+              type: LoadBalancer
+      schedulerServiceTemplate:
+        replicas: {{ control_plane.services.nova.scheduler_replicas }}
+      cellTemplates:
+        cell0:
+          cellDatabaseAccount: nova-cell0
+          cellDatabaseInstance: openstack
+          cellMessageBusInstance: rabbitmq
+          hasAPIAccess: true
+        cell1:
+          cellDatabaseAccount: nova-cell1
+          cellDatabaseInstance: openstack-cell1
+          cellMessageBusInstance: rabbitmq-cell1
+          noVNCProxyServiceTemplate:
+            enabled: true
+            networkAttachments:
+              - ctlplane
+          hasAPIAccess: true
+      secret: osp-secret
+
+  keystone:
+    apiOverride:
+      route: {}
+    template:
+      override:
+        service:
+          internal:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+            spec:
+              type: LoadBalancer
+      databaseInstance: openstack
+      secret: osp-secret
+      replicas: {{ control_plane.services.keystone.replicas }}
+
+  glance:
+    apiOverrides:
+      default:
+        route: {}
+    template:
+      databaseInstance: openstack
+      storage:
+        storageRequest: {{ control_plane.services.glance.storage_request }}
+      secret: osp-secret
+      keystoneEndpoint: default
+      glanceAPIs:
+        default:
+          replicas: {{ control_plane.services.glance.api_replicas }}
+          override:
+            service:
+              internal:
+                metadata:
+                  annotations:
+                    metallb.universe.tf/address-pool: internalapi
+                    metallb.universe.tf/allow-shared-ip: internalapi
+                    metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+                spec:
+                  type: LoadBalancer
+          networkAttachments:
+            - storage
+
+  neutron:
+    apiOverride:
+      route: {}
+    template:
+      replicas: {{ control_plane.services.neutron.api_replicas }}
+      override:
+        service:
+          internal:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+            spec:
+              type: LoadBalancer
+      databaseInstance: openstack
+      secret: osp-secret
+      networkAttachments:
+        - internalapi
+
+  barbican:
+    apiOverride:
+      route: {}
+    template:
+      databaseInstance: openstack
+      secret: osp-secret
+      barbicanAPI:
+        replicas: {{ control_plane.services.barbican.api_replicas }}
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+              spec:
+                type: LoadBalancer
+      barbicanWorker:
+        replicas: {{ control_plane.services.barbican.worker_replicas }}
+      barbicanKeystoneListener:
+        replicas: {{ control_plane.services.barbican.listener_replicas }}
+
+  {% if control_plane.services.swift.enabled %}
+  swift:
+    enabled: true
+    proxyOverride:
+      route: {}
+    template:
+      swiftProxy:
+        networkAttachments:
+          - storage
+        override:
+          service:
+            internal:
+              metadata:
+                annotations:
+                  metallb.universe.tf/address-pool: internalapi
+                  metallb.universe.tf/allow-shared-ip: internalapi
+                  metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+              spec:
+                type: LoadBalancer
+        replicas: {{ control_plane.services.swift.proxy_replicas }}
+        secret: osp-secret
+      swiftRing:
+        ringReplicas: {{ control_plane.services.swift.ring_replicas }}
+      swiftStorage:
+        networkAttachments:
+          - storage
+        replicas: {{ control_plane.services.swift.storage_replicas }}
+        storageRequest: {{ control_plane.services.swift.storage_request }}
+  {% endif %}
+
+  placement:
+    apiOverride:
+      route: {}
+    template:
+      override:
+        service:
+          internal:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/allow-shared-ip: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start }}
+            spec:
+              type: LoadBalancer
+      databaseInstance: openstack
+      replicas: {{ control_plane.services.placement.replicas }}
+      secret: osp-secret
+
+  ovn:
+    template:
+      ovnDBCluster:
+        ovndbcluster-nb:
+          replicas: {{ control_plane.services.ovn.nb_replicas }}
+          dbType: NB
+          storageRequest: {{ control_plane.services.ovn.db_storage_request }}
+          networkAttachment: internalapi
+        ovndbcluster-sb:
+          replicas: {{ control_plane.services.ovn.sb_replicas }}
+          dbType: SB
+          storageRequest: {{ control_plane.services.ovn.db_storage_request }}
+          networkAttachment: internalapi
+      ovnNorthd:
+        replicas: {{ control_plane.services.ovn.northd_replicas }}
+
+  galera:
+    templates:
+      openstack:
+        storageRequest: {{ control_plane.services.galera.storage_request }}
+        secret: osp-secret
+        replicas: {{ control_plane.services.galera.openstack_replicas }}
+      openstack-cell1:
+        storageRequest: {{ control_plane.services.galera.storage_request }}
+        secret: osp-secret
+        replicas: {{ control_plane.services.galera.cell1_replicas }}
+
+  rabbitmq:
+    templates:
+      rabbitmq:
+        replicas: {{ control_plane.services.rabbitmq.openstack_replicas }}
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start | regex_replace('(\d+)$', '85') }}
+            spec:
+              type: LoadBalancer
+      rabbitmq-cell1:
+        replicas: {{ control_plane.services.rabbitmq.cell1_replicas }}
+        override:
+          service:
+            metadata:
+              annotations:
+                metallb.universe.tf/address-pool: internalapi
+                metallb.universe.tf/loadBalancerIPs: {{ networks.internalapi.metallb_pool.start | regex_replace('(\d+)$', '86') }}
+            spec:
+              type: LoadBalancer
+
+  memcached:
+    templates:
+      memcached:
+        replicas: {{ control_plane.services.memcached.replicas }}
+
+  {% if control_plane.services.telemetry.enabled %}
+  telemetry:
+    enabled: true
+    template:
+      metricStorage:
+        enabled: {{ control_plane.services.telemetry.metric_storage_enabled }}
+        dashboardsEnabled: {{ control_plane.services.telemetry.dashboards_enabled }}
+        dataplaneNetwork: ctlplane
+        networkAttachments:
+          - ctlplane
+        monitoringStack:
+          alertingEnabled: {{ control_plane.services.telemetry.alerting_enabled }}
+          scrapeInterval: 30s
+          storage:
+            strategy: persistent
+            retention: 24h
+            persistent:
+              pvcStorageRequest: {{ control_plane.services.telemetry.storage_request }}
+        autoscaling:
+          enabled: false
+        aodh:
+          databaseAccount: aodh
+          databaseInstance: openstack
+          passwordSelector:
+            aodhService: AodhPassword
+          rabbitMqClusterName: rabbitmq
+          serviceUser: aodh
+          secret: osp-secret
+          heatInstance: heat
+        ceilometer:
+          enabled: true
+          secret: osp-secret
+        logging:
+          enabled: false
+          ipaddr: {{ networks.internalapi.metallb_pool.start }}
+  {% endif %}
+
+---
+# templates/dataplane-nodeset.yaml.j2

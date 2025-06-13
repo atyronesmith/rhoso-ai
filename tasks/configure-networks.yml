@@ -1,0 +1,205 @@
+---
+# tasks/configure-networks.yml
+# Network configuration tasks for RHOSO deployment
+
+- name: Install NMState Operator
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: kubernetes-nmstate-operator
+        namespace: openshift-nmstate
+      spec:
+        channel: stable
+        installPlanApproval: Automatic
+        name: kubernetes-nmstate-operator
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+
+- name: Wait for NMState Operator
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: openshift-nmstate
+    label_selectors:
+      - operators.coreos.com/kubernetes-nmstate-operator.openshift-nmstate
+  register: nmstate_csv
+  until: nmstate_csv.resources | length > 0 and nmstate_csv.resources[0].status.phase == "Succeeded"
+  retries: 30
+  delay: 10
+
+- name: Create NMState instance
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: nmstate.io/v1
+      kind: NMState
+      metadata:
+        name: nmstate
+      spec: {}
+
+- name: Install MetalLB Operator
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: Subscription
+      metadata:
+        name: metallb-operator
+        namespace: metallb-system
+      spec:
+        channel: stable
+        installPlanApproval: Automatic
+        name: metallb-operator
+        source: redhat-operators
+        sourceNamespace: openshift-marketplace
+
+- name: Wait for MetalLB Operator
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: ClusterServiceVersion
+    namespace: metallb-system
+    label_selectors:
+      - operators.coreos.com/metallb-operator.metallb-system
+  register: metallb_csv
+  until: metallb_csv.resources | length > 0 and metallb_csv.resources[0].status.phase == "Succeeded"
+  retries: 30
+  delay: 10
+
+- name: Create MetalLB instance
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: MetalLB
+      metadata:
+        name: metallb
+        namespace: metallb-system
+      spec: {}
+
+- name: Enable global IP forwarding for OVNKubernetes
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operator.openshift.io/v1
+      kind: Network
+      metadata:
+        name: cluster
+      spec:
+        defaultNetwork:
+          ovnKubernetesConfig:
+            gatewayConfig:
+              ipForwarding: Global
+  when: network_backend == "OVNKubernetes" and enable_global_forwarding | default(false)
+
+- name: Wait for network operator to reconcile
+  ansible.builtin.pause:
+    seconds: 30
+  when: network_backend == "OVNKubernetes" and enable_global_forwarding | default(false)
+
+# Create Node Network Configuration Policies
+- name: Generate NNCP configurations for each worker
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: nmstate.io/v1
+      kind: NodeNetworkConfigurationPolicy
+      metadata:
+        name: osp-{{ item.0.interface }}-{{ item.1.name }}
+      spec:
+        nodeSelector:
+          kubernetes.io/hostname: "{{ item.1.name }}"
+          node-role.kubernetes.io/worker: ""
+        desiredState:
+          interfaces: "{{ lookup('template', 'nncp-interfaces.j2') | from_yaml }}"
+  loop: "{{ networks | dict2items | product(worker_nodes) | list }}"
+  when: item.0.value.nncp_range is defined and item.0.value.nncp_range
+
+# Create NetworkAttachmentDefinitions
+- name: Create NetworkAttachmentDefinitions for each network
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: k8s.cni.cncf.io/v1
+      kind: NetworkAttachmentDefinition
+      metadata:
+        name: "{{ item.key }}"
+        namespace: openstack
+        labels:
+          osp/net: "{{ item.key }}"
+      spec:
+        config: "{{ lookup('template', 'nad-config.j2') | to_json }}"
+  loop: "{{ networks | dict2items }}"
+  when: item.value.nad_ipam_range is defined and item.value.nad_ipam_range
+
+# Create MetalLB IP Address Pools
+- name: Create MetalLB IPAddressPools
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: "{{ item.key }}"
+        namespace: metallb-system
+      spec:
+        addresses:
+          - "{{ item.value.metallb_pool.start }}-{{ item.value.metallb_pool.end }}"
+        autoAssign: true
+        avoidBuggyIPs: false
+  loop: "{{ networks | dict2items }}"
+  when: item.value.metallb_pool is defined and item.value.metallb_pool
+
+# Create MetalLB L2Advertisements
+- name: Create MetalLB L2Advertisements
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: metallb.io/v1beta1
+      kind: L2Advertisement
+      metadata:
+        name: "{{ item.key }}"
+        namespace: metallb-system
+      spec:
+        ipAddressPools:
+          - "{{ item.key }}"
+        interfaces:
+          - "{{ item.value.interface }}"
+  loop: "{{ networks | dict2items }}"
+  when: item.value.metallb_pool is defined and item.value.metallb_pool
+
+# Create NetConfig CR
+- name: Create NetConfig CR
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: network.openstack.org/v1beta1
+      kind: NetConfig
+      metadata:
+        name: openstacknetconfig
+        namespace: openstack
+      spec:
+        networks: "{{ lookup('template', 'netconfig-networks.j2') | from_yaml }}"
+
+# Wait for network resources to be ready
+- name: Wait for NetworkAttachmentDefinitions to be ready
+  kubernetes.core.k8s_info:
+    api_version: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    namespace: openstack
+  register: nad_status
+  until: nad_status.resources | length >= (networks | dict2items | selectattr('value.nad_ipam_range', 'defined') | list | length)
+  retries: 30
+  delay: 10
+
+- name: Wait for IPAddressPools to be ready
+  kubernetes.core.k8s_info:
+    api_version: metallb.io/v1beta1
+    kind: IPAddressPool
+    namespace: metallb-system
+  register: pool_status
+  until: pool_status.resources | length >= (networks | dict2items | selectattr('value.metallb_pool', 'defined') | list | length)
+  retries: 30
+  delay: 10

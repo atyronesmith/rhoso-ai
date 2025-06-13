@@ -1,0 +1,196 @@
+---
+# vars/network-config.yml
+# Network configuration for RHOSO deployment
+# Customize these values for your environment
+
+# Network definitions - modify as needed for your environment
+networks:
+  ctlplane:
+    cidr: 192.168.122.0/24
+    dns_domain: ctlplane.example.com
+    mtu: 1500
+    vlan_id: # No VLAN for control plane by default
+    allocation_ranges:
+      - start: 192.168.122.100
+        end: 192.168.122.250
+    gateway: 192.168.122.1
+    dns_servers:
+      - 192.168.122.1
+    metallb_pool:
+      start: 192.168.122.80
+      end: 192.168.122.90
+    nad_ipam_range:
+      start: 192.168.122.30
+      end: 192.168.122.70
+    nncp_range:
+      start: 192.168.122.10
+      end: 192.168.122.20
+    interface: enp6s0 # Physical interface name
+
+  external:
+    cidr: 10.0.0.0/24
+    dns_domain: external.example.com
+    mtu: 1500
+    vlan_id:
+    allocation_ranges:
+      - start: 10.0.0.100
+        end: 10.0.0.250
+    gateway: 10.0.0.1
+    dns_servers: []
+    metallb_pool: # External network typically doesn't use MetalLB
+    nad_ipam_range:
+    nncp_range:
+    interface: enp7s0
+
+  internalapi:
+    cidr: 172.17.0.0/24
+    dns_domain: internalapi.example.com
+    mtu: 1500
+    vlan_id: 20
+    allocation_ranges:
+      - start: 172.17.0.100
+        end: 172.17.0.250
+    exclude_addresses:
+      - 172.17.0.10
+      - 172.17.0.12
+    gateway:
+    dns_servers: []
+    metallb_pool:
+      start: 172.17.0.80
+      end: 172.17.0.90
+    nad_ipam_range:
+      start: 172.17.0.30
+      end: 172.17.0.70
+    nncp_range:
+      start: 172.17.0.10
+      end: 172.17.0.20
+    interface: enp6s0 # Using VLAN on same interface as ctlplane
+
+  storage:
+    cidr: 172.18.0.0/24
+    dns_domain: storage.example.com
+    mtu: 9000 # Jumbo frames for storage
+    vlan_id: 21
+    allocation_ranges:
+      - start: 172.18.0.100
+        end: 172.18.0.250
+    gateway:
+    dns_servers: []
+    metallb_pool: # Storage network typically doesn't use MetalLB
+    nad_ipam_range:
+      start: 172.18.0.30
+      end: 172.18.0.70
+    nncp_range:
+      start: 172.18.0.10
+      end: 172.18.0.20
+    interface: enp6s0
+
+  tenant:
+    cidr: 172.19.0.0/24
+    dns_domain: tenant.example.com
+    mtu: 1500
+    vlan_id: 22
+    allocation_ranges:
+      - start: 172.19.0.100
+        end: 172.19.0.250
+    gateway:
+    dns_servers: []
+    metallb_pool:
+    nad_ipam_range:
+      start: 172.19.0.30
+      end: 172.19.0.70
+    nncp_range:
+      start: 172.19.0.10
+      end: 172.19.0.20
+    interface: enp6s0
+
+  octavia:
+    cidr: 172.23.0.0/24
+    dns_domain: octavia.example.com
+    mtu: 1500
+    vlan_id: 24
+    allocation_ranges:
+      - start: 172.23.0.100
+        end: 172.23.0.250
+    gateway:
+    dns_servers: []
+    metallb_pool:
+    nad_ipam_range:
+      start: 172.23.0.30
+      end: 172.23.0.70
+    nncp_range: # Octavia uses bridge interface
+    interface: enp6s0
+    bridge_name: octbr # Octavia requires a bridge
+
+  storagemgmt:
+    cidr: 172.20.0.0/24
+    dns_domain: storagemgmt.example.com
+    mtu: 9000
+    vlan_id: 23
+    allocation_ranges:
+      - start: 172.20.0.100
+        end: 172.20.0.250
+    gateway:
+    dns_servers: []
+    metallb_pool:
+    nad_ipam_range:
+      start: 172.20.0.30
+      end: 172.20.0.70
+    nncp_range:
+      start: 172.20.0.10
+      end: 172.20.0.20
+    interface: enp6s0
+
+# Worker node configuration
+worker_nodes:
+  - name: worker-0
+    networks:
+      ctlplane:
+        ip: 192.168.122.10
+      internalapi:
+        ip: 172.17.0.10
+      storage:
+        ip: 172.18.0.10
+      tenant:
+        ip: 172.19.0.10
+      storagemgmt:
+        ip: 172.20.0.10
+
+  - name: worker-1
+    networks:
+      ctlplane:
+        ip: 192.168.122.11
+      internalapi:
+        ip: 172.17.0.11
+      storage:
+        ip: 172.18.0.11
+      tenant:
+        ip: 172.19.0.11
+      storagemgmt:
+        ip: 172.20.0.11
+
+  - name: worker-2
+    networks:
+      ctlplane:
+        ip: 192.168.122.12
+      internalapi:
+        ip: 172.17.0.12
+      storage:
+        ip: 172.18.0.12
+      tenant:
+        ip: 172.19.0.12
+      storagemgmt:
+        ip: 172.20.0.12
+
+# Network provider configuration
+network_backend: OVNKubernetes # or OpenShiftSDN
+enable_global_forwarding: true # Required for MetalLB on secondary interfaces with OVNKubernetes
+
+# DNS configuration
+dns_servers:
+  - 192.168.122.1
+  - 192.168.122.2
+
+dns_search_domains:
+  - example.com
+  - openstack.example.com

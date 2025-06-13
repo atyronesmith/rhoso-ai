@@ -1,0 +1,202 @@
+---
+# vars/deployment-config.yml
+# Deployment configuration for RHOSO
+
+# Environment name (used for overlays and naming)
+environment_name: production
+
+# Dry run mode - set to true to generate configs without applying
+dry_run: false
+
+# Storage configuration
+create_storage_class: true
+storage_class_name: local-storage
+storage_provisioner: kubernetes.io/no-provisioner # Change for your storage backend
+storage_parameters: {}
+storage_binding_mode: WaitForFirstConsumer
+
+# Service passwords - CHANGE THESE IN PRODUCTION
+# These will be base64 encoded automatically
+service_passwords:
+  AdminPassword: "{{ 'changeme123!' | b64encode }}"
+  AodhPassword: "{{ 'aodhpass123!' | b64encode }}"
+  AodhDatabasePassword: "{{ 'aodhdbpass123!' | b64encode }}"
+  BarbicanDatabasePassword: "{{ 'barbicandbpass123!' | b64encode }}"
+  BarbicanPassword: "{{ 'barbicanpass123!' | b64encode }}"
+  BarbicanSimpleCryptoKEK: "{{ 'YlhrdnlhVk9kRGcwN0RQRE1ubVE3RVphazA9Cg==' | b64encode }}"
+  CeilometerPassword: "{{ 'ceilometerpass123!' | b64encode }}"
+  CinderDatabasePassword: "{{ 'cinderdbpass123!' | b64encode }}"
+  CinderPassword: "{{ 'cinderpass123!' | b64encode }}"
+  DatabasePassword: "{{ 'databasepass123!' | b64encode }}"
+  DbRootPassword: "{{ 'dbrootpass123!' | b64encode }}"
+  DesignateDatabasePassword: "{{ 'designatedbpass123!' | b64encode }}"
+  DesignatePassword: "{{ 'designatepass123!' | b64encode }}"
+  GlanceDatabasePassword: "{{ 'glancedbpass123!' | b64encode }}"
+  GlancePassword: "{{ 'glancepass123!' | b64encode }}"
+  HeatAuthEncryptionKey: "{{ 'heatauthencryptionkey1234567890' | b64encode }}"
+  HeatDatabasePassword: "{{ 'heatdbpass123!' | b64encode }}"
+  HeatPassword: "{{ 'heatpass123!' | b64encode }}"
+  IronicDatabasePassword: "{{ 'ironicdbpass123!' | b64encode }}"
+  IronicInspectorDatabasePassword: "{{ 'ironicinspectordbpass123!' | b64encode }}"
+  IronicInspectorPassword: "{{ 'ironicinspectorpass123!' | b64encode }}"
+  IronicPassword: "{{ 'ironicpass123!' | b64encode }}"
+  KeystoneDatabasePassword: "{{ 'keystonedbpass123!' | b64encode }}"
+  ManilaDatabasePassword: "{{ 'maniladbpass123!' | b64encode }}"
+  ManilaPassword: "{{ 'manilapass123!' | b64encode }}"
+  MetadataSecret: "{{ 'metadatasecret123!' | b64encode }}"
+  NeutronDatabasePassword: "{{ 'neutrondbpass123!' | b64encode }}"
+  NeutronPassword: "{{ 'neutronpass123!' | b64encode }}"
+  NovaAPIDatabasePassword: "{{ 'novaapidbpass123!' | b64encode }}"
+  NovaAPIMessageBusPassword: "{{ 'novaapimsgpass123!' | b64encode }}"
+  NovaCell0DatabasePassword: "{{ 'novacell0dbpass123!' | b64encode }}"
+  NovaCell0MessageBusPassword: "{{ 'novacell0msgpass123!' | b64encode }}"
+  NovaCell1DatabasePassword: "{{ 'novacell1dbpass123!' | b64encode }}"
+  NovaCell1MessageBusPassword: "{{ 'novacell1msgpass123!' | b64encode }}"
+  NovaPassword: "{{ 'novapass123!' | b64encode }}"
+  OctaviaDatabasePassword: "{{ 'octaviadbpass123!' | b64encode }}"
+  OctaviaPassword: "{{ 'octaviapass123!' | b64encode }}"
+  PlacementDatabasePassword: "{{ 'placementdbpass123!' | b64encode }}"
+  PlacementPassword: "{{ 'placementpass123!' | b64encode }}"
+  SwiftPassword: "{{ 'swiftpass123!' | b64encode }}"
+
+# Control plane configuration
+control_plane:
+  name: openstack-control-plane
+  services:
+    cinder:
+      api_replicas: 3
+      scheduler_replicas: 1
+      backup_replicas: 0 # Set to 1+ when backend configured
+      volume_replicas: 0 # Set to 1+ when backend configured
+    nova:
+      api_replicas: 3
+      metadata_replicas: 3
+      scheduler_replicas: 3
+    glance:
+      api_replicas: 0 # Set to 3 when backend configured
+      storage_request: 10G
+    keystone:
+      replicas: 3
+    barbican:
+      api_replicas: 3
+      worker_replicas: 3
+      listener_replicas: 1
+    neutron:
+      api_replicas: 3
+    swift:
+      enabled: true
+      proxy_replicas: 2
+      storage_replicas: 3
+      storage_request: 10Gi
+      ring_replicas: 3
+    placement:
+      replicas: 3
+    galera:
+      openstack_replicas: 3
+      cell1_replicas: 3
+      storage_request: 5000M
+    rabbitmq:
+      openstack_replicas: 3
+      cell1_replicas: 3
+    memcached:
+      replicas: 3
+    ovn:
+      northd_replicas: 3
+      nb_replicas: 3
+      sb_replicas: 3
+      db_storage_request: 10G
+    telemetry:
+      enabled: true
+      metric_storage_enabled: true
+      dashboards_enabled: true
+      alerting_enabled: true
+      storage_request: 20G
+
+# Data plane configuration
+dataplane_nodesets:
+  - name: openstack-data-plane
+    count: 3
+    node_template:
+      ansible_ssh_user: cloud-admin
+      ansible_ssh_private_key_secret: dataplane-ansible-ssh-private-key-secret
+      management_network: ctlplane
+      networks:
+        - ctlplane
+        - internalapi
+        - storage
+        - tenant
+      persistent_logs_pvc: ansible-logs-pvc
+      pre_provisioned: true # Change to false for bare metal provisioning
+    nodes:
+      - name: edpm-compute-0
+        hostname: edpm-compute-0
+        ansible_host: 192.168.122.100
+        node_networks:
+          ctlplane:
+            ip: 192.168.122.100
+          internalapi:
+            ip: 172.17.0.100
+          storage:
+            ip: 172.18.0.100
+          tenant:
+            ip: 172.19.0.100
+        mac_address: 52:54:04:60:55:22
+        fqdn_internal_api: edpm-compute-0.example.com
+
+      - name: edpm-compute-1
+        hostname: edpm-compute-1
+        ansible_host: 192.168.122.101
+        node_networks:
+          ctlplane:
+            ip: 192.168.122.101
+          internalapi:
+            ip: 172.17.0.101
+          storage:
+            ip: 172.18.0.101
+          tenant:
+            ip: 172.19.0.101
+        mac_address: 52:54:04:60:55:23
+        fqdn_internal_api: edpm-compute-1.example.com
+
+# Subscription Manager configuration
+subscription_manager:
+  username: your-rhsm-username
+  password: your-rhsm-password
+
+# Red Hat registry credentials
+redhat_registry:
+  username: your-registry-username
+  password: your-registry-password
+
+# Repository configuration
+rhel_repositories:
+  - { name: "*", state: disabled }
+  - { name: rhel-9-for-x86_64-baseos-eus-rpms, state: enabled }
+  - { name: rhel-9-for-x86_64-appstream-eus-rpms, state: enabled }
+  - { name: rhel-9-for-x86_64-highavailability-eus-rpms, state: enabled }
+  - { name: fast-datapath-for-rhel-9-x86_64-rpms, state: enabled }
+  - { name: rhoso-18.0-for-rhel-9-x86_64-rpms, state: enabled }
+  - { name: rhceph-7-tools-for-rhel-9-x86_64-rpms, state: enabled }
+
+# Bare metal configuration (if pre_provisioned: false)
+bare_metal:
+  namespace: openstack
+  cloud_user_name: cloud-admin
+  bmc_secret_name: bmc-secret
+  provision_interface: enp1s0
+  provision_network:
+    name: provisioning
+    cidr: 172.22.0.0/24
+    dhcp_start: 172.22.0.10
+    dhcp_end: 172.22.0.254
+
+# Feature flags
+features:
+  tls_enabled: true
+  network_isolation: true
+  ceph_integration: false # Set to true if using Ceph
+  enable_telemetry: true
+  enable_manila: false
+  enable_designate: false
+  enable_octavia: true
+  enable_ironic: false
