@@ -1,0 +1,12 @@
+# This file will be generated from templates
+# Placeholder for IPAddressPool resources
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: ctlplane
+  namespace: metallb-system
+spec:
+  addresses: []  # Will be populated by generator
+  autoAssign: true
+  avoidBuggyIPs: false

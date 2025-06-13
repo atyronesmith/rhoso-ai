@@ -1,0 +1,14 @@
+# This file will be generated from templates
+# Placeholder for OpenStackDataPlaneNodeSet resource
+---
+apiVersion: dataplane.openstack.org/v1beta1
+kind: OpenStackDataPlaneNodeSet
+metadata:
+  name: openstack-data-plane
+  namespace: openstack
+spec:
+  preProvisioned: true
+  tlsEnabled: true
+  env:
+    - name: ANSIBLE_FORCE_COLOR
+      value: "True"

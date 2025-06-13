@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: openstack
+
+bases:
+  - ../../base
+
+namePrefix: development-
+nameSuffix: ""
+
+commonLabels:
+  environment: development
+
+commonAnnotations:
+  deployment.rhoso.openstack.org/environment: development
+
+# Environment-specific patches
+patchesStrategicMerge:
+  - patches/controlplane-patch.yaml
+  - patches/dataplane-patch.yaml
+
+# Environment-specific resources
+resources:
+  - resources/extra-secrets.yaml
+
+# ConfigMap customization
+configMapGenerator:
+  - name: development-config
+    literals:
+      - environment=development
+      - debug=true
+
+# Secret customization
+secretGenerator:
+  - name: development-credentials
+    literals:
+      - username=admin
+      - password=changeme
+    options:
+      disableNameSuffixHash: true
+
+# Variable substitution
+vars:
+  - name: STORAGE_CLASS
+    objref:
+      kind: StorageClass
+      name: development-storage
+      apiVersion: storage.k8s.io/v1
+  - name: ENVIRONMENT
+    objref:
+      kind: ConfigMap
+      name: development-config
+      apiVersion: v1
+    fieldref:
+      fieldpath: data.environment
+
+# Image customization (if needed)
+images:
+  - name: registry.redhat.io/rhosp-dev-preview/openstack-nova-compute-rhel9
+    newTag: 18.0-development
+
+# Replica customization
+replicas:
+  - name: keystone
+    count: 1

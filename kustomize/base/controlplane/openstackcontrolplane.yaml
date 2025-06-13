@@ -1,0 +1,11 @@
+# This file will be generated from templates
+# Placeholder for OpenStackControlPlane resource
+---
+apiVersion: core.openstack.org/v1beta1
+kind: OpenStackControlPlane
+metadata:
+  name: openstack-control-plane
+  namespace: openstack
+spec:
+  secret: osp-secret
+  storageClass: local-storage  # Will be replaced by kustomize

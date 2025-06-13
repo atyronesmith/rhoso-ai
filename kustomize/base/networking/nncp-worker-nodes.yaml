@@ -1,0 +1,13 @@
+# This file will be generated from templates
+# Placeholder for NodeNetworkConfigurationPolicy resources
+---
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: osp-enp6s0-worker-0
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: worker-0
+    node-role.kubernetes.io/worker: ""
+  desiredState:
+    interfaces: []  # Will be populated by generator

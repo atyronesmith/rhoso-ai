@@ -1,0 +1,22 @@
+# Service-specific configuration overrides
+# This file contains ConfigMaps for service customization
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nova-config-override
+  namespace: openstack
+data:
+  custom.conf: |
+    [DEFAULT]
+    # Custom Nova configuration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neutron-config-override
+  namespace: openstack
+data:
+  custom.conf: |
+    [DEFAULT]
+    # Custom Neutron configuration

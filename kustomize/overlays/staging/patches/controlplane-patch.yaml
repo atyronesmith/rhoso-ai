@@ -1,0 +1,23 @@
+apiVersion: core.openstack.org/v1beta1
+kind: OpenStackControlPlane
+metadata:
+  name: openstack-control-plane
+spec:
+  storageClass: staging-storage-class
+  # Environment-specific overrides
+  keystone:
+    template:
+      replicas: 1
+  nova:
+    template:
+      apiServiceTemplate:
+        replicas: 1
+      metadataServiceTemplate:
+        replicas: 1
+  neutron:
+    template:
+      replicas: 1
+  cinder:
+    template:
+      cinderAPI:
+        replicas: 1

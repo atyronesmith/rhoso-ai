@@ -1,0 +1,10 @@
+# This file will be generated from templates
+# Placeholder for NetConfig resource
+---
+apiVersion: network.openstack.org/v1beta1
+kind: NetConfig
+metadata:
+  name: openstacknetconfig
+  namespace: openstack
+spec:
+  networks: []  # Will be populated by generator

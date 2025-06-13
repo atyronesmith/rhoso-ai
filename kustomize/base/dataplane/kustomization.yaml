@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - openstackdataplanenodeset.yaml
+  - openstackdataplanedeployment.yaml
+  - baremetalhosts.yaml
+
+commonLabels:
+  app.kubernetes.io/component: dataplane
+  app.kubernetes.io/part-of: rhoso

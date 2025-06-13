@@ -1,0 +1,12 @@
+# This file will be generated from templates
+# Placeholder for L2Advertisement resources
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: ctlplane
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - ctlplane
+  interfaces: []  # Will be populated by generator

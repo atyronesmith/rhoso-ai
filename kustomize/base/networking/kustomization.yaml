@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - nncp-worker-nodes.yaml
+  - network-attachment-definitions.yaml
+  - metallb-ipaddresspools.yaml
+  - metallb-l2advertisements.yaml
+  - netconfig.yaml
+
+commonLabels:
+  app.kubernetes.io/component: networking
+  app.kubernetes.io/part-of: rhoso

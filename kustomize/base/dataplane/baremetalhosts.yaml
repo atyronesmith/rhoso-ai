@@ -1,0 +1,10 @@
+# Placeholder for BareMetalHost resources
+# Only used when preProvisioned: false
+---
+# apiVersion: metal3.io/v1alpha1
+# kind: BareMetalHost
+# metadata:
+#   name: compute-0
+#   namespace: openstack
+# spec:
+#   online: true
