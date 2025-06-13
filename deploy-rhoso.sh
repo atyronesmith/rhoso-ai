@@ -92,7 +92,8 @@ validate_configuration() {
 backup_existing_resources() {
     print_info "Backing up existing resources..."
 
-    local backup_dir="${SCRIPT_DIR}/backups/$(date +%Y%m%d_%H%M%S)"
+    local backup_dir
+    backup_dir="${SCRIPT_DIR}/backups/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$backup_dir"
 
     # Backup existing RHOSO resources if they exist
@@ -110,7 +111,8 @@ backup_existing_resources() {
 deploy_rhoso() {
     print_info "Starting RHOSO deployment..."
 
-    local log_file="${SCRIPT_DIR}/logs/deployment_$(date +%Y%m%d_%H%M%S).log"
+    local log_file
+    log_file="${SCRIPT_DIR}/logs/deployment_$(date +%Y%m%d_%H%M%S).log"
 
     # Run the Ansible playbook
     ansible-playbook \

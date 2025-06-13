@@ -1,0 +1,172 @@
+---
+# ansible/test-network.yml
+# Test network configuration before deployment
+
+- name: Test Network Configuration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/network-config.yml
+
+  tasks:
+    - name: Display network configuration summary
+      ansible.builtin.debug:
+        msg: |
+          Network Configuration Summary:
+          =============================
+          {% for net_name, net_config in networks.items() %}
+          {{ net_name }}:
+            CIDR: {{ net_config.cidr }}
+            VLAN: {{ net_config.vlan_id | default('untagged') }}
+            Interface: {{ net_config.interface }}
+            MTU: {{ net_config.mtu }}
+          {% endfor %}
+
+    - name: Check for network conflicts
+      block:
+        - name: Collect all CIDRs
+          ansible.builtin.set_fact:
+            all_cidrs: "{{ networks.values() | map(attribute='cidr') | list }}"
+
+        - name: Check for duplicate CIDRs
+          ansible.builtin.fail:
+            msg: "Duplicate CIDR found: {{ item }}"
+          when: all_cidrs | select('equalto', item) | list | length > 1
+          loop: "{{ all_cidrs | unique }}"
+
+    - name: Validate VLAN IDs
+      ansible.builtin.fail:
+        msg: "Invalid VLAN ID {{ item.value.vlan_id }} for network {{ item.key }}"
+      when:
+        - item.value.vlan_id is defined
+        - item.value.vlan_id is not none
+        - item.value.vlan_id < 1 or item.value.vlan_id > 4094
+      loop: "{{ networks | dict2items }}"
+
+    - name: Check IP range overlaps
+      block:
+        - name: Check MetalLB pool vs NAD range overlap
+          ansible.builtin.fail:
+            msg: "MetalLB pool overlaps with NAD range in {{ item.key }}"
+          when:
+            - item.value.metallb_pool is defined
+            - item.value.nad_ipam_range is defined
+            - item.value.metallb_pool.start <= item.value.nad_ipam_range.end
+            - item.value.metallb_pool.end >= item.value.nad_ipam_range.start
+          loop: "{{ networks | dict2items }}"
+
+    - name: Validate MTU settings
+      ansible.builtin.fail:
+        msg: "MTU {{ item.value.mtu }} is outside valid range for {{ item.key }}"
+      when: item.value.mtu < 1280 or item.value.mtu > 9216
+      loop: "{{ networks | dict2items }}"
+
+    - name: Check OpenShift cluster connectivity
+      block:
+        - name: Test connection to OpenShift API
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Namespace
+            name: default
+          register: ns_check
+
+        - name: Verify OpenShift access
+          ansible.builtin.assert:
+            that:
+              - ns_check is succeeded
+            fail_msg: "Cannot connect to OpenShift cluster"
+
+    - name: Check for existing RHOSO resources
+      kubernetes.core.k8s_info:
+        api_version: "{{ item.api }}"
+        kind: "{{ item.kind }}"
+        namespace: openstack
+      register: existing_resources
+      loop:
+        - { api: "core.openstack.org/v1beta1", kind: "OpenStackControlPlane" }
+        - { api: "dataplane.openstack.org/v1beta1", kind: "OpenStackDataPlaneNodeSet" }
+
+    - name: Display existing resources warning
+      ansible.builtin.debug:
+        msg: "WARNING: Existing {{ item.item.kind }} resources found in namespace openstack"
+      when: item.resources | length > 0
+      loop: "{{ existing_resources.results }}"
+
+    - name: Validate worker nodes
+      block:
+        - name: Get worker nodes
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Node
+            label_selectors:
+              - node-role.kubernetes.io/worker
+          register: worker_nodes
+
+        - name: Check minimum worker nodes
+          ansible.builtin.assert:
+            that:
+              - worker_nodes.resources | length >= 3
+            fail_msg: "Insufficient worker nodes. Found {{ worker_nodes.resources | length }}, need at least 3"
+
+        - name: Display worker nodes
+          ansible.builtin.debug:
+            msg: |
+              Worker Nodes:
+              {% for node in worker_nodes.resources %}
+              - {{ node.metadata.name }}: {{ node.status.addresses | selectattr('type', 'equalto', 'InternalIP') | map(attribute='address') | first }}
+              {% endfor %}
+
+    - name: Generate network validation report
+      ansible.builtin.copy:
+        content: |
+          RHOSO Network Configuration Validation Report
+          ============================================
+          Generated: {{ ansible_date_time.iso8601 }}
+
+          Network Summary:
+          ---------------
+          Total Networks: {{ networks | length }}
+          Networks with VLANs: {{ networks | dict2items | selectattr('value.vlan_id', 'defined') | list | length }}
+          Networks with MetalLB: {{ networks | dict2items | selectattr('value.metallb_pool', 'defined') | list | length }}
+
+          Configuration Details:
+          ---------------------
+          {% for net_name, net_config in networks.items() %}
+          {{ net_name }}:
+            CIDR: {{ net_config.cidr }}
+            VLAN ID: {{ net_config.vlan_id | default('None (untagged)') }}
+            Interface: {{ net_config.interface }}
+            MTU: {{ net_config.mtu }}
+            Gateway: {{ net_config.gateway | default('None') }}
+            DNS Domain: {{ net_config.dns_domain }}
+            {% if net_config.allocation_ranges is defined %}
+            Allocation Ranges:
+            {% for range in net_config.allocation_ranges %}
+              - {{ range.start }} to {{ range.end }}
+            {% endfor %}
+            {% endif %}
+            {% if net_config.metallb_pool is defined %}
+            MetalLB Pool: {{ net_config.metallb_pool.start }} - {{ net_config.metallb_pool.end }}
+            {% endif %}
+            {% if net_config.nad_ipam_range is defined %}
+            NAD IPAM Range: {{ net_config.nad_ipam_range.start }} - {{ net_config.nad_ipam_range.end }}
+            {% endif %}
+
+          {% endfor %}
+
+          Validation Status: PASSED
+
+        dest: "./network-validation-report-{{ ansible_date_time.epoch }}.txt"
+        mode: '0644'
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: |
+          Network validation completed successfully!
+          Report saved to: ./network-validation-report-{{ ansible_date_time.epoch }}.txt
+
+          Next steps:
+          1. Review the network validation report
+          2. Ensure physical network infrastructure matches configuration
+          3. Run deployment with: make deploy
